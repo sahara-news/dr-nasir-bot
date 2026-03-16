@@ -2,6 +2,7 @@
 import os
 import logging
 import threading
+import asyncio
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -23,14 +24,15 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 else:
-    logger.error("GEMINI_API_KEY environment variable not set.")
+    logger.error("GEMINI_API_KEY environment variable not set. Exiting.")
     exit(1)
 
-# Initialize Gemini model
-GEMINI_MODEL = "gemini-1.5-flash" # Using gemini-1.5-flash as it's generally more capable than 2.0-flash if available
-model = genai.GenerativeModel(GEMINI_MODEL)
+# Initialize Gemini model with system instruction
+GEMINI_MODEL = "gemini-1.5-flash"
+SYSTEM_INSTRUCTION = "Tumhara naam Dr. Nasir hai. Tum ek helpful AI assistant ho. Tum hamesha Roman Urdu (Urdu written in English/Latin script) mein reply karte ho. Tum friendly aur professional ho."
 
-SYSTEM_PROMPT = "Tumhara naam Dr. Nasir hai. Tum ek helpful AI assistant ho. Tum hamesha Roman Urdu (Urdu written in English/Latin script) mein reply karte ho. Tum friendly aur professional ho."
+# For models that support system instructions
+model = genai.GenerativeModel(GEMINI_MODEL, system_instruction=SYSTEM_INSTRUCTION)
 
 # Health check server
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -66,15 +68,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def generate_gemini_reply(user_message: str) -> str:
     """Generate a reply using Google Gemini API."""
     try:
-        # Start a chat session with the system prompt
-        chat = model.start_chat(history=[
-            {"role": "user", "parts": SYSTEM_PROMPT},
-            {"role": "model", "parts": "Jee main Dr. Nasir hoon. Aapki kya madad kar sakta hoon?"} # Initial bot response to establish persona
-        ])
+        # Start a chat session without system prompt in history, as it's already in model config
+        chat = model.start_chat(history=[])
         response = await chat.send_message_async(user_message)
         return response.text.strip()
     except Exception as e:
-        logger.error(f"Error generating reply from Gemini: {e}")
+        logger.error(f"Error generating reply from Gemini: {e}", exc_info=True) # Log full traceback
         return "Maaf karna, abhi main jawab nahi de pa raha. Kuch masla ho gaya hai."
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
