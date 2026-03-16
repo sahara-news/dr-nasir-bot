@@ -2,7 +2,6 @@
 import os
 import logging
 import threading
-import asyncio
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -24,27 +23,31 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 else:
-    logger.error("GEMINI_API_KEY environment variable not set. Exiting.")
+    logger.error("GEMINI_API_KEY environment variable not set.")
     exit(1)
 
-# Initialize Gemini model with system instruction
-GEMINI_MODEL = "gemini-2.0-flash" # Changed to gemini-2.0-flash as requested
-SYSTEM_INSTRUCTION = "Tumhara naam Dr. Nasir hai. Tum ek helpful AI assistant ho. Tum hamesha Roman Urdu (Urdu written in English/Latin script) mein reply karte ho. Tum friendly aur professional ho."
+# Initialize Gemini model
+GEMINI_MODEL = "gemini-1.5-flash" # Using gemini-1.5-flash as it's generally more capable than 2.0-flash if available
+model = genai.GenerativeModel(GEMINI_MODEL)
 
-# For models that support system instructions
-model = genai.GenerativeModel(GEMINI_MODEL, system_instruction=SYSTEM_INSTRUCTION)
+SYSTEM_PROMPT = "Tumhara naam Dr. Nasir hai. Tum ek helpful AI assistant ho. Tum hamesha Roman Urdu (Urdu written in English/Latin script) mein reply karte ho. Tum friendly aur professional ho."
 
 # Health check server
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Bot is running and healthy!")
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b"Bot is running and healthy!")
+        else:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"Not Found")
 
 def run_health_server():
     port = int(os.environ.get("PORT", 8080)) # Default to 8080 if PORT not set
-    server_address = ("", port)
+    server_address = ('', port)
     httpd = HTTPServer(server_address, HealthCheckHandler)
     logger.info(f"Health check server running on port {port}")
     httpd.serve_forever()
@@ -63,12 +66,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def generate_gemini_reply(user_message: str) -> str:
     """Generate a reply using Google Gemini API."""
     try:
-        # Start a chat session without system prompt in history, as it's already in model config
-        chat = model.start_chat(history=[])
+        # Start a chat session with the system prompt
+        chat = model.start_chat(history=[
+            {"role": "user", "parts": SYSTEM_PROMPT},
+            {"role": "model", "parts": "Jee main Dr. Nasir hoon. Aapki kya madad kar sakta hoon?"} # Initial bot response to establish persona
+        ])
         response = await chat.send_message_async(user_message)
         return response.text.strip()
     except Exception as e:
-        logger.error(f"Error generating reply from Gemini: {e}", exc_info=True) # Log full traceback
+        logger.error(f"Error generating reply from Gemini: {e}")
         return "Maaf karna, abhi main jawab nahi de pa raha. Kuch masla ho gaya hai."
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -84,7 +90,7 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main() -> None:
     """Start the bot and the health check server."""
-    # Start the health check server in a separate thread FIRST
+    # Start the health check server in a separate thread
     health_thread = threading.Thread(target=run_health_server)
     health_thread.daemon = True  # Allow the main program to exit even if thread is running
     health_thread.start()
